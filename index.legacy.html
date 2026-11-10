@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JARVIS</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; width: 100%; overflow: hidden; background: #000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  #app { display: flex; height: 100%; width: 100%; }
+  #orb-container { position: relative; width: 40%; height: 100%; background: #000; }
+  #orb-canvas { display: block; width: 100%; height: 100%; }
+  #graph-container { position: relative; width: 60%; height: 100%; background: #000; }
+  #graph { width: 100%; height: 100%; }
+  #chat-overlay { position: fixed; bottom: 0; left: 0; right: 0; padding: 20px; background: linear-gradient(180deg, transparent, rgba(0,0,0,0.95) 50%); z-index: 10; pointer-events: none; }
+  #chat-inner { max-width: 900px; margin: 0 auto; pointer-events: auto; }
+  #chat-log { max-height: 200px; overflow-y: auto; margin-bottom: 12px; color: #0ff; font-size: 14px; line-height: 1.5; }
+  .msg { margin-bottom: 8px; opacity: 0.9; }
+  .msg.user { color: #fff; }
+  .msg.jarvis { color: #0ff; }
+  .msg.system { color: #888; font-style: italic; }
+  #input-row { display: flex; gap: 8px; }
+  #input { flex: 1; background: rgba(0,20,20,0.8); border: 1px solid #044; color: #0ff; padding: 10px 14px; font-size: 14px; outline: none; border-radius: 4px; }
+  #input:focus { border-color: #0ff; box-shadow: 0 0 8px #044; }
+  #send-btn { background: #022; border: 1px solid #044; color: #0ff; padding: 10px 20px; font-size: 14px; cursor: pointer; border-radius: 4px; transition: all 0.2s; }
+  #send-btn:hover { background: #044; border-color: #0ff; }
+  #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  #status-bar { position: fixed; top: 0; left: 0; right: 0; height: 28px; background: rgba(0,0,0,0.9); border-bottom: 1px solid #022; display: flex; align-items: center; padding: 0 16px; gap: 16px; font-size: 12px; color: #088; z-index: 20; }
+  #status-bar span { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #044; }
+  .dot.active { background: #0ff; box-shadow: 0 0 6px #0ff; }
+  .dot.speaking { background: #0ff; animation: pulse 0.5s ease-in-out infinite alternate; }
+  @keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
+  #search-indicator { position: fixed; top: 36px; left: 50%; transform: translateX(-50%); background: rgba(0,30,30,0.95); border: 1px solid #044; padding: 8px 16px; border-radius: 4px; color: #0ff; font-size: 13px; display: none; z-index: 15; }
+  #search-indicator.partial { border-color: #880; color: #ff0; background: rgba(30,30,0,0.95); }
+</style>
+</head>
+<body>
+<div id="status-bar">
+  <span><span id="dot-orb" class="dot"></span> Orb</span>
+  <span><span id="dot-graph" class="dot"></span> Graph</span>
+  <span><span id="dot-claude" class="dot"></span> Claude</span>
+  <span><span id="dot-voice" class="dot"></span> Voice</span>
+  <span id="search-status"></span>
+</div>
+<div id="search-indicator" aria-live="polite"></div>
+<div id="app">
+  <div id="orb-container">
+    <canvas id="orb-canvas"></canvas>
+  </div>
+  <div id="graph-container">
+    <div id="graph"></div>
+  </div>
+</div>
+<div id="chat-overlay">
+  <div id="chat-inner">
+    <div id="chat-log" role="log" aria-live="polite"></div>
+    <div id="input-row">
+      <input type="text" id="input" placeholder="Type to JARVIS…" autocomplete="off" spellcheck="false">
+      <button id="send-btn" disabled>Send</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from './vendor/three.module.js';
+import ForceGraph3D from './vendor/3d-force-graph.min.js';
+
+// ============ ORB (Three.js) ============
+const orbContainer = document.getElementById('orb-container');
+const canvas = document.getElementById('orb-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+renderer.setSize(orbContainer.clientWidth, orbContainer.clientHeight);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+// Camera - will be positioned dynamically
+const fov = 50;
+const camera = new THREE.PerspectiveCamera(fov, orbContainer.clientWidth / orbContainer.clientHeight, 0.1, 1000);
+
+// Orb parameters
+const CORE_RADIUS = 0.35;
+const SURFACE_RADIUS = 1.0;
+const CAGE_RADIUS = 1.25;
+const MAX_DISPLACEMENT = SURFACE_RADIUS * 0.18; // 18% cap
+
+// Compute camera distance so cage fits in view with padding
+function computeCameraDistance() {
+  const aspect = camera.aspect;
+  const vFov = THREE.MathUtils.degToRad(fov);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+  // Fit cage radius horizontally with 15% padding
+  const distH = (CAGE_RADIUS * 1.15) / Math.tan(hFov / 2);
+  const distV = (CAGE_RADIUS * 1.15) / Math.tan(vFov / 2);
+  return Math.max(distH, distV);
+}
+
+function updateCamera() {
+  const dist = computeCameraDistance();
+  camera.position.set(0, 0, dist);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+}
+
+updateCamera();
+
+// Core sphere (glowing inner)
+const coreGeometry = new THREE.SphereGeometry(CORE_RADIUS, 32, 32);
+const coreMaterial = new THREE.MeshBasicMaterial({
+  color: 0x00ffff,
+  transparent: true,
+  opacity: 0.6,
+  depthWrite: false
+});
+const core = new THREE.Mesh(coreGeometry, coreMaterial);
+core.renderOrder = 0;
+scene.add(core);
+
+// Surface sphere (rippling)
+const surfaceGeometry = new THREE.IcosahedronGeometry(SURFACE_RADIUS, 64); // ~13k vertices
+const surfaceMaterial = new THREE.MeshBasicMaterial({
+  color: 0x00ffff,
+  transparent: true,
+  opacity: 0.25,
+  depthWrite: false,
+  wireframe: false,
+  side: THREE.DoubleSide
+});
+
+// Store original positions
+const positions = surfaceGeometry.attributes.position;
+const originalPositions = new Float32Array(positions.array);
+surfaceGeometry.setAttribute('originalPosition', new THREE.BufferAttribute(originalPositions.slice(), 3));
+
+// Custom shader for noise displacement
+const vertexShader = `
+  attribute vec3 originalPosition;
+  uniform float uTime;
+  uniform float uDisplacement;
+  uniform float uSpeaking;
+  
+  // Simplex 3D noise
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+  
+  float snoise(vec3 v) {
+    const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+    vec3 i  = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+    vec3 g = step(x0.yzx, x0.xyz);
+    vec3 l = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+    i = mod289(i);
+    vec4 p = permute(permute(permute(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+    float n_ = 1.0/7.0;
+    vec3 ns = n_ * D.wyz - D.xzx;
+    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+    vec4 x = x_ * ns.x + ns.yyyy;
+    vec4 y = y_ * ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+    vec4 s0 = floor(b0)*2.0 + 1.0;
+    vec4 s1 = floor(b1)*2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+    vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+    vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+    vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+  }
+  
+  void main() {
+    vec3 pos = originalPosition;
+    float n = snoise(pos * 2.0 + uTime * 0.3);
+    float n2 = snoise(pos * 4.0 - uTime * 0.15);
+    float noise = (n + n2 * 0.5) * 0.5;
+    
+    // Speaking adds a radial pulse
+    float pulse = uSpeaking * 0.3 * sin(uTime * 8.0 + length(pos) * 10.0) * exp(-uTime * 0.5);
+    
+    float displacement = uDisplacement * noise + pulse;
+    displacement = clamp(displacement, 0.0, 1.0);
+    
+    vec3 normal = normalize(pos);
+    vec3 displaced = pos + normal * displacement;
+    
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+  }
+`;
+
+const fragmentShader = `
+  varying vec3 vNormal;
+  void main() {
+    float fresnel = pow(1.0 - abs(dot(normalize(vNormal), vec3(0,0,1))), 2.0);
+    gl_FragColor = vec4(0.0, 1.0, 1.0, 0.15 + fresnel * 0.3);
+  }
+`;
+
+// Use ShaderMaterial for the surface
+const surfaceMaterial2 = new THREE.ShaderMaterial({
+  vertexShader,
+  fragmentShader,
+  uniforms: {
+    uTime: { value: 0 },
+    uDisplacement: { value: 0 },
+    uSpeaking: { value: 0 }
+  },
+  transparent: true,
+  depthWrite: false,
+  side: THREE.DoubleSide
+});
+
+const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial2);
+surface.renderOrder = 1;
+scene.add(surface);
+
+// Wireframe cage
+const cageGeometry = new THREE.IcosahedronGeometry(CAGE_RADIUS, 2);
+const cageMaterial = new THREE.MeshBasicMaterial({
+  color: 0x00ffff,
+  transparent: true,
+  opacity: 0.08,
+  wireframe: true,
+  depthWrite: false
+});
+const cage = new THREE.Mesh(cageGeometry, cageMaterial);
+cage.renderOrder = 2;
+scene.add(cage);
+
+// Subtle ambient particles
+const particleGeometry = new THREE.BufferGeometry();
+const particleCount = 200;
+const particlePositions = new Float32Array(particleCount * 3);
+const particleSizes = new Float32Array(particleCount);
+for (let i = 0; i < particleCount; i++) {
+  const r = CAGE_RADIUS * 1.5 + Math.random() * 2;
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  particlePositions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+  particlePositions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+  particlePositions[i*3+2] = r * Math.cos(phi);
+  particleSizes[i] = Math.random() * 2 + 0.5;
+}
+particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+particleGeometry.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+const pCanvas = document.createElement('canvas');
+pCanvas.width = 32; pCanvas.height = 32;
+const pCtx = pCanvas.getContext('2d');
+const pGrad = pCtx.createRadialGradient(16, 16, 0, 16, 16, 16);
+pGrad.addColorStop(0, 'rgba(0, 255, 255, 1)');
+pGrad.addColorStop(0.3, 'rgba(0, 255, 255, 0.6)');
+pGrad.addColorStop(1, 'rgba(0, 255, 255, 0)');
+pCtx.fillStyle = pGrad;
+pCtx.fillRect(0, 0, 32, 32);
+const pTexture = new THREE.CanvasTexture(pCanvas);
+
+const particleMaterial = new THREE.PointsMaterial({
+  color: 0x00ffff,
+  size: 3,
+  map: pTexture,
+  transparent: true,
+  opacity: 0.65,
+  sizeAttenuation: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending
+});
+const particles = new THREE.Points(particleGeometry, particleMaterial);
+scene.add(particles);
+
+// Lighting for core glow effect
+const pointLight = new THREE.PointLight(0x00ffff, 0.5, 5);
+pointLight.position.set(0, 0, 0);
+scene.add(pointLight);
+
+// Animation state
+let speaking = false;
+let lastSpeaking = false;
+let speakStartTime = 0;
+let silenceStartTime = 0;
+let displacement = 0;
+const DISPLACEMENT_MAX = MAX_DISPLACEMENT;
+const DISPLACEMENT_IDLE = 0.15; // 15% of max when idle
+let lastFrameTime = performance.now();
+
+// Ripple envelope: decays on elapsed TIME, not per frame
+function computeDisplacement(dt, now) {
+  const speakingNow = speaking;
+  
+  // Rising edge: kick pulse
+  if (speakingNow && !lastSpeaking) {
+    speakStartTime = now;
+    displacement = DISPLACEMENT_MAX;
+  }
+  
+  if (speakingNow) {
+    silenceStartTime = 0;
+    // Active speaking: hold near max with subtle variation
+    const pulse = Math.sin(now * 0.008) * 0.15 + Math.sin(now * 0.013) * 0.1;
+    displacement = DISPLACEMENT_MAX * (0.85 + pulse * 0.15);
+  } else if (lastSpeaking && !speakingNow) {
+    // Falling edge: start silence timer
+    if (silenceStartTime === 0) silenceStartTime = now;
+    const silenceDuration = now - silenceStartTime;
+    if (silenceDuration < 1000) {
+      // Hold for 1 second
+      displacement = DISPLACEMENT_MAX * 0.7;
+    } else {
+      // Decay exponentially over ~2 seconds
+      const decayTime = (silenceDuration - 1000) / 2000;
+      displacement = DISPLACEMENT_MAX * 0.7 * Math.exp(-decayTime * 3);
+      if (displacement < DISPLACEMENT_MAX * DISPLACEMENT_IDLE) {
+        displacement = DISPLACEMENT_MAX * DISPLACEMENT_IDLE;
+      }
+    }
+  } else {
+    // Idle: gentle breathing
+    silenceStartTime = 0;
+    displacement = DISPLACEMENT_MAX * DISPLACEMENT_IDLE * (1 + 0.3 * Math.sin(now * 0.001));
+  }
+  
+  lastSpeaking = speakingNow;
+  return displacement;
+}
+
+function animate(now) {
+  requestAnimationFrame(animate);
+  
+  const dt = now - lastFrameTime;
+  lastFrameTime = now;
+  
+  // Update speaking state from server (polled separately)
+  
+  // Compute displacement based on time, not frame count
+  const currentDisp = computeDisplacement(dt, now);
+  
+  // Update shader uniforms
+  surfaceMaterial2.uniforms.uTime.value = now * 0.001;
+  surfaceMaterial2.uniforms.uDisplacement.value = currentDisp;
+  surfaceMaterial2.uniforms.uSpeaking.value = speaking ? 1.0 : 0.0;
+  
+  // Core pulse
+  const coreScale = 1 + (speaking ? 0.15 * Math.sin(now * 0.01) : 0.02 * Math.sin(now * 0.002));
+  core.scale.setScalar(coreScale);
+  coreMaterial.opacity = speaking ? 0.8 : 0.5;
+  pointLight.intensity = speaking ? 1.0 : 0.3;
+  
+  // Cage subtle rotation
+  cage.rotation.y += 0.0001;
+  cage.rotation.x += 0.00005;
+  
+  // Particles
+  particles.rotation.y += 0.00002;
+  
+  renderer.render(scene, camera);
+}
+
+animate(performance.now());
+
+// Handle resize
+function onResize() {
+  const w = orbContainer.clientWidth;
+  const h = orbContainer.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  updateCamera();
+}
+window.addEventListener('resize', onResize);
+
+// ============ GRAPH (3d-force-graph) ============
+const graphContainer = document.getElementById('graph');
+let graph = null;
+let graphData = null;
+let searchActive = false;
+let lastSearchTime = 0;
+let refreshInFlight = false;
+let pendingSearch = null;
+
+async function loadGraph() {
+  try {
+    const res = await fetch('/api/graph');
+    const data = await res.json();
+    graphData = data;
+    renderGraph(data);
+    document.getElementById('dot-graph').classList.add('active');
+  } catch (e) {
+    console.error('Graph load failed:', e);
+    document.getElementById('dot-graph').classList.remove('active');
+  }
+}
+
+function renderGraph(data) {
+  if (graph) {
+    graph.graphData(data);
+  } else {
+    graph = ForceGraph3D()(graphContainer)
+      .graphData(data)
+      .nodeId('id')
+      .nodeLabel(node => `${node.name} (${node.type || 'file'}) - Click to Open`)
+      .nodeColor('color')
+      .nodeOpacity(node => node.type === 'folder' ? 0.9 : 0.6)
+      .onNodeClick(node => {
+        if (node.path || node.id) {
+          fetch('/api/open?path=' + encodeURIComponent(node.path || node.id));
+        }
+      })
+      .nodeThreeObject(node => {
+        const size = node.type === 'folder' ? 0.8 : 0.4;
+        const geometry = new THREE.SphereGeometry(size, 16, 16);
+        const material = new THREE.MeshBasicMaterial({
+          color: node.color,
+          transparent: true,
+          opacity: node.type === 'folder' ? 0.9 : 0.6
+        });
+        return new THREE.Mesh(geometry, material);
+      })
+      .linkColor(() => '#004444')
+      .linkOpacity(0.3)
+      .linkWidth(0.5)
+      .backgroundColor('#000000')
+      .enableNavigationControls(true)
+      .enableNodeDrag(true)
+      .onEngineStop(() => {
+        // Fit camera when layout settles
+        if (graph && !searchActive) {
+          graph.zoomToFit(1000, 20);
+        }
+      });
+    
+    // Initial fit after a delay to let physics start
+    setTimeout(() => {
+      if (graph && !searchActive) {
+        graph.zoomToFit(1500, 30);
+      }
+    }, 2000);
+  }
+  
+  // Apply search filter if active
+  if (data.search_active) {
+    applySearchFilter(data);
+  }
+}
+
+function applySearchFilter(data) {
+  searchActive = true;
+  lastSearchTime = Date.now();
+  
+  const indicator = document.getElementById('search-indicator');
+  indicator.textContent = data.search_message || 'Filtering...';
+  indicator.classList.toggle('partial', data.search_partial);
+  indicator.style.display = 'block';
+  
+  document.getElementById('search-status').textContent = `🔍 ${data.search_message}`;
+  
+  // Re-fit to filtered data
+  setTimeout(() => {
+    if (graph) graph.zoomToFit(800, 30);
+  }, 300);
+}
+
+function clearSearchFilter() {
+  if (!searchActive) return;
+  searchActive = false;
+  
+  const indicator = document.getElementById('search-indicator');
+  indicator.style.display = 'none';
+  document.getElementById('search-status').textContent = '';
+  
+  // Restore full graph
+  if (graphData) {
+    renderGraph(graphData);
+  }
+}
+
+// Poll for search results
+async function pollSearch() {
+  try {
+    const res = await fetch('/api/search');
+    const data = await res.json();
+    if (data.matches && data.matches.length > 0) {
+      // Search result arrived - it wins over any in-flight refresh
+      pendingSearch = data;
+      if (refreshInFlight) {
+        // The refresh will complete but we'll override with search
+      }
+      // Fetch full graph and filter
+      const graphRes = await fetch('/api/graph');
+      const graphData = await graphRes.json();
+      applySearchFilter(graphData);
+    } else if (searchActive && Date.now() - lastSearchTime > 30000) {
+      // Search expired
+      clearSearchFilter();
+    }
+  } catch (e) {
+    console.error('Search poll failed:', e);
+  }
+}
+
+// Poll for speaking state
+async function pollState() {
+  try {
+    const res = await fetch('/api/state');
+    const data = await res.json();
+    speaking = data.speaking;
+    document.getElementById('dot-claude').classList.toggle('active', data.claude_available);
+    document.getElementById('dot-voice').classList.toggle('active', data.speaking);
+    document.getElementById('dot-voice').classList.toggle('speaking', data.speaking);
+  } catch (e) {
+    console.error('State poll failed:', e);
+  }
+}
+
+// Periodic graph refresh (but search wins)
+async function refreshGraph() {
+  if (searchActive) return; // Don't refresh while search is active
+  refreshInFlight = true;
+  try {
+    const res = await fetch('/api/graph');
+    const data = await res.json();
+    if (!searchActive) { // Double-check
+      graphData = data;
+      renderGraph(data);
+    }
+  } catch (e) {
+    console.error('Graph refresh failed:', e);
+  } finally {
+    refreshInFlight = false;
+    // If a search arrived during refresh, apply it
+    if (pendingSearch) {
+      const graphRes = await fetch('/api/graph');
+      const graphData = await graphRes.json();
+      applySearchFilter(graphData);
+      pendingSearch = null;
+    }
+  }
+}
+
+// Start polling
+setInterval(pollState, 250);
+setInterval(pollSearch, 1000);
+setInterval(refreshGraph, 30000);
+
+// Initial load
+loadGraph();
+
+// ============ CHAT ============
+const chatLog = document.getElementById('chat-log');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send-btn');
+
+function addMessage(role, text) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.textContent = text;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+async function sendMessage() {
+  const text = input.value.trim();
+  if (!text) return;
+  
+  addMessage('user', text);
+  input.value = '';
+  sendBtn.disabled = true;
+  sendBtn.textContent = '...';
+  
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    });
+    const data = await res.json();
+    if (data.response) {
+      addMessage('jarvis', data.response);
+    } else if (data.error) {
+      addMessage('system', 'Error: ' + data.error);
+    }
+  } catch (e) {
+    addMessage('system', 'Connection error: ' + e.message);
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send';
+    input.focus();
+  }
+}
+
+sendBtn.addEventListener('click', sendMessage);
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// Check initial state
+pollState().then(data => {
+  if (!data.claude_available) {
+    addMessage('system', 'Claude Code CLI not logged in. Run "claude auth login" in terminal.');
+  } else {
+    addMessage('system', 'JARVIS ready. Type a message.');
+  }
+  sendBtn.disabled = false;
+});
+
+// Orb ready
+document.getElementById('dot-orb').classList.add('active');
+</script>
+</body>
+</html>

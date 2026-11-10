@@ -1,0 +1,201 @@
+@import "tailwindcss";
+
+@theme {
+  --color-nova-bg: #05080d;
+  --color-nova-bgElevated: #0a1018;
+  --color-nova-border: #1a2533;
+  --color-nova-borderBright: #2a3a4a;
+  --color-nova-text: #e8f4f8;
+  --color-nova-textMuted: #6b8a99;
+  --color-nova-textDim: #3a5a6a;
+  --color-nova-cyan: #55E8FF;
+  --color-nova-teal: #55FFD1;
+  --color-nova-violet: #9A8CFF;
+  --color-nova-amber: #FFB84D;
+  --color-nova-amberDim: #ffb84d40;
+  --color-nova-red: #FF4D6A;
+  --color-nova-redDim: #ff4d6a40;
+  
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --font-sans: 'Inter', 'system-ui', sans-serif;
+  
+  --animate-pulse-slow: pulse 3s ease-in-out infinite;
+  --animate-spin-slow: spin 20s linear infinite;
+  --animate-spin-reverse: spin 15s linear infinite reverse;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-glow: glow 2s ease-in-out infinite alternate;
+  --animate-scan: scan 2s ease-in-out infinite;
+  --animate-particle: particle 8s linear infinite;
+  
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  
+  @keyframes glow {
+    0% { opacity: 0.3; }
+    100% { opacity: 0.8; }
+  }
+  
+  @keyframes scan {
+    0% { transform: scale(0.8); opacity: 0.5; }
+    100% { transform: scale(1.5); opacity: 0; }
+  }
+  
+  @keyframes particle {
+    0% { transform: translateY(0) rotate(0deg); opacity: 0.3; }
+    50% { opacity: 0.8; }
+    100% { transform: translateY(-100vh) rotate(360deg); opacity: 0; }
+  }
+  
+  --shadow-glow-cyan: 0 0 30px #55E8FF40, 0 0 60px #55E8FF20;
+  --shadow-glow-teal: 0 0 30px #55FFD140, 0 0 60px #55FFD120;
+  --shadow-glow-violet: 0 0 30px #9A8CFF40, 0 0 60px #9A8CFF20;
+  --shadow-glow-amber: 0 0 30px #FFB84D40, 0 0 60px #FFB84D20;
+  --shadow-inner-glow: inset 0 0 30px #55E8FF20;
+}
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  html, body, #root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  
+  body {
+    font-family: var(--font-sans);
+    background: 
+      radial-gradient(ellipse at 20% 20%, #0a1520 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, #0d1a25 0%, transparent 50%),
+      var(--color-nova-bg);
+    color: var(--color-nova-text);
+    -webkit-font-smoothing: antialiased;
+  }
+  
+  ::selection {
+    background-color: #55E8FF4D;
+    color: var(--color-nova-text);
+  }
+  
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-nova-borderBright);
+    border-radius: 9999px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-nova-textMuted);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .glass-panel {
+    background: #0a1018CC;
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid #1a253380;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
+  
+  .glow-cyan {
+    box-shadow: 0 0 30px #55E8FF40, 0 0 60px #55E8FF20;
+  }
+  
+  .glow-teal {
+    box-shadow: 0 0 30px #55FFD140, 0 0 60px #55FFD120;
+  }
+  
+  .glow-violet {
+    box-shadow: 0 0 30px #9A8CFF40, 0 0 60px #9A8CFF20;
+  }
+  
+  .glow-amber {
+    box-shadow: 0 0 30px #FFB84D40, 0 0 60px #FFB84D20;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes gridMove {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(50px, 50px); }
+}
+
+.grid-pattern {
+  background-image: 
+    linear-gradient(rgba(85, 232, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(85, 232, 255, 0.02) 1px, transparent 1px);
+  background-size: 50px 50px;
+  animation: gridMove 60s linear infinite;
+}
+
+.reactor-ring {
+  animation: spin 20s linear infinite;
+}
+
+.reactor-ring-reverse {
+  animation: spin 15s linear infinite reverse;
+}
+
+.pulse-ring {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.scan-pulse {
+  animation: scan 2s ease-in-out infinite;
+}
+
+.particle-float {
+  animation: particle 8s linear infinite;
+}
+
+.float-slow {
+  animation: float 6s ease-in-out infinite;
+}
+
+.glow-pulse {
+  animation: glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes reactorOrbitOne { to { transform: rotate(360deg) rotateX(68deg); } }
+@keyframes reactorOrbitTwo { to { transform: rotate(-360deg) rotateY(68deg); } }
+@keyframes reactorOrbitThree { to { transform: rotate(360deg) rotateX(42deg) rotateY(32deg); } }
+@keyframes reactorPulse { 0%, 100% { transform: scale(0.92); filter: brightness(0.85); } 50% { transform: scale(1.12); filter: brightness(1.35); } }
+@keyframes graphHalo { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.32; } }
+.reactor-fallback { perspective: 700px; overflow: hidden; }
+.reactor-core-fallback { width: 84px; height: 84px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #e9ffff 0%, #55e8ff 20%, #168ba6 52%, #07121e 74%); box-shadow: 0 0 24px #55e8ff, 0 0 70px #55e8ff88, 0 0 145px #9a8cff44; animation: reactorPulse 2.2s ease-in-out infinite; }
+.reactor-core-inner { width: 100%; height: 100%; border-radius: inherit; background: radial-gradient(circle, #ffffff80 0 3%, transparent 40%); }
+/* Orbit rings are expressed as % of their container so they never escape the panel */
+.reactor-orbit { position: absolute; width: min(210px, 60%); height: min(210px, 60%); border: 1px solid #55e8ff99; border-radius: 50%; box-shadow: 0 0 14px #55e8ff55; }
+.reactor-orbit-one { animation: reactorOrbitOne 9s linear infinite; }
+.reactor-orbit-two { width: min(170px, 48%); height: min(170px, 48%); border-color: #9a8cffaa; animation: reactorOrbitTwo 12s linear infinite; }
+.reactor-orbit-three { width: min(254px, 72%); height: min(254px, 72%); border-color: #55ffd188; animation: reactorOrbitThree 16s linear infinite; }
+.reactor-scan { position: absolute; width: min(90px, 26%); height: min(90px, 26%); border: 1px solid #55ffd1; border-radius: 50%; animation: scan 2.8s ease-out infinite; }
+.graph-node-halo { animation: graphHalo 2.4s ease-in-out infinite; }

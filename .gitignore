@@ -1,0 +1,20 @@
+# Local Orbit state and configuration
+/.orbit/
+/.orbit_config.json
+
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+
+# Frontend dependencies and build output
+/nova-os/node_modules/
+/nova-os/dist/
+
+# Ad-hoc local request payloads
+/test*.json
+/nvidia_test.json
